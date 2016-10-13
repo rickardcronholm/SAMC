@@ -1,0 +1,78 @@
+BEAM_SYNCVMLC
+AIR700ICRU
+0, 0, 0, 4, 0, 3, 1,  IWATCH ETC. phspType=4
+{NCASE}, {IXXIN}, {JXXIN}, 999, 0, 0, 0, 0,  NCASE ETC.
+9, 21, 1, 0, 0, 0, 0, 0, 0, 0,  IQIN, ISOURCE + OPTIONS
+{myPhsp}
+0, 0, 0.7, 0.01, 0, 1, 1.0,  0 , ECUT,PCUT,IREJCT,ESAVE
+0, 0, 0, 0, 0,  PHOTON FORCING
+1, 3,  SCORING INPUT
+0,1
+0,  DOSE COMPONENTS
+45.0, Z TO FRONT FACE
+*********** start of CM SLABS with identifier airGap1 ***********
+30, RMAX
+AirSlab to end 
+1, NSLABS
+45.0, ZMIN
+0.5, 0.7, 0.01, 0, 0, 0
+AIR700ICRU
+*********** start of CM SYNCVMLC with identifier MLC  ***********
+20.5, RMAX
+Millenium MLC - 120 leaves
+1, 3, 1, ORIENT, NGROUP, MODE
+48.25, ZMIN
+6.7, ZTHICK
+0.5, 0.04, 0.04, 0.1354, 0.3252, 0.1227, 48.25, 48.533, 51.524, 51.732, 52.98, 53.28, 2, 54.5474, 54.812, FULL leaf
+0.25, 0.04, 0.04, 0.0929, 0.1371, 0.1371, 48.345, 48.6096, 49.5277, 49.8277, 2, 51.625, 51.627, 54.7, 54.746, TARGET leaf
+0.25, 0.04, 0.04, 0.0354, 0.1285, 0.1235, 48.412, 48.531, 51.631, 51.732, 53.3293, 53.6293, 2, 54.5474, 54.812, ISOCENTER leaf
+10, 1, FULL leaves
+40, 2, TARGET/ISOCENTER pairs
+10, 1, FULL leaves
+-10.2, START
+0.006, LEAFGAP
+0, ENDTYPE
+8, ZFOCUS or RADIUS of leaf ends
+0, ZFOCUS of leaf sides
+syncmlcSequence
+0.7, 0.01, 0, 0, 
+AIR700ICRU
+0.7, 0.01, 0, 0, 0, 
+MLC17.32
+0.7, 0.01, 0, 0, 
+AIR700ICRU
+*********** start of CM SLABS with identifier airGap3  ***********
+30, RMAX
+Air Slab 1
+1, NSLABS
+64, ZMIN
+1, 0.7, 0.01, 0, 0, 0
+AIR700ICRU
+*********************end of all CMs*****************************
+ #########################
+ :Start MC Transport Parameter:
+ 
+ Global ECUT= 0.7
+ Global PCUT= 0.01
+ Global SMAX= 1e10
+ ESTEPE= 0.25
+ XIMAX= 0.5
+ Boundary crossing algorithm= EXACT
+ Skin depth for BCA= 3
+ Electron-step algorithm= PRESTA-II
+ Spin effects= On
+ Brems angular sampling= KM
+ Brems cross sections= NIST
+ Bound Compton scattering= On
+ Compton cross sections= default
+ Pair angular sampling= KM
+ Pair cross sections= BH
+ Photoelectron angular sampling= On
+ Rayleigh scattering= Off
+ Atomic relaxations= Off
+ Electron impact ionization= Off
+ Photon cross sections= si
+ Photon cross-sections output= Off
+ 
+ :Stop MC Transport Parameter:
+ #########################

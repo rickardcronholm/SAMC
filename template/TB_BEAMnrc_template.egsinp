@@ -1,0 +1,66 @@
+BEAM_TB_jaws
+AIR700ICRU
+0, 0, 0, {phspType}, 0, 3, 1,  IWATCH ETC. phspType=4
+{NCASE}, {IXXIN}, {JXXIN}, 999, 0, 0, 0, 0,  NCASE ETC.
+9, 21, 1, 0, 0, 0, 0, 0, 0, 0,  IQIN, ISOURCE + OPTIONS
+{phsp}
+0, 0, 0.7, 0.01, 0, 1, 1.0,  0 , ECUT,PCUT,IREJCT,ESAVE
+0, 0, 0, 0, 0,  PHOTON FORCING
+1, 3,  SCORING INPUT
+0,1
+0,  DOSE COMPONENTS
+26.7, Z TO FRONT FACE (should correlate with Z of phsp)
+*********** start of CM SLABS with identifier airGap1  ***********
+30, RMAX
+Thin Air slab
+1, NSLABS
+26.7, ZMIN
+0.1, 0.7, 0.01, 0, 0, 0
+AIR700ICRU
+*********** start of CM SYNCJAWS with identifier xy_jaws  ***********
+30.0, RMAX
+secondary collimators - Asymmetric field.  Upper jaw-rotates about arc. Lower jaw- pivots about upper inside corner.
+2, 1, # PAIRED BARS OR JAWS, field type
+Y
+X
+syncjawSequence
+0.7, 0.01, 0, 0, 
+0.7, 0.01, 0, 0, 
+MIL-T-21014
+0.7, 0.01, 0, 0, 
+MIL-T-21014
+*********** start of CM SLABS with identifier airGap2 ***********
+30, RMAX
+AirSlab to end 
+1, NSLABS
+44.51168, ZMIN
+0.48832, 0.7, 0.01, 0, 0, 0
+AIR700ICRU
+*********************end of all CMs*****************************
+ #########################
+ :Start MC Transport Parameter:
+ 
+ Global ECUT= 0.7
+ Global PCUT= 0.01
+ Global SMAX= 1e10
+ ESTEPE= 0.25
+ XIMAX= 0.5
+ Boundary crossing algorithm= EXACT
+ Skin depth for BCA= 3
+ Electron-step algorithm= PRESTA-II
+ Spin effects= On
+ Brems angular sampling= KM
+ Brems cross sections= NIST
+ Bound Compton scattering= On
+ Compton cross sections= default
+ Pair angular sampling= KM
+ Pair cross sections= BH
+ Photoelectron angular sampling= On
+ Rayleigh scattering= Off
+ Atomic relaxations= Off
+ Electron impact ionization= Off
+ Photon cross sections= si
+ Photon cross-sections output= Off
+ 
+ :Stop MC Transport Parameter:
+ #########################
