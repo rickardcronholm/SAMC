@@ -166,8 +166,8 @@ def getMU(RTP, beams):
 def getEnFlu(RTP, beams):
     nomEnfluMod = []
     for i in range(0, len(beams)):
-        nomE = ''.join([(RTP.BeamSequence[i].ControlPointSequence[0].NominalBeamEnergy).original_string, 'X'])
-        fluMod = (RTP.BeamSequence[i].PrimaryFluenceModeSequence[0].FluenceMode)
+        nomE = ''.join([(RTP.BeamSequence[beams[i]].ControlPointSequence[0].NominalBeamEnergy).original_string, 'X'])
+        fluMod = (RTP.BeamSequence[beams[i]].PrimaryFluenceModeSequence[0].FluenceMode)
         nomEnfluMod.append('_'.join([nomE, fluMod]).rstrip())
     return nomEnfluMod
 
@@ -530,7 +530,7 @@ def syncjawSeq(timeStamp, xJawPos, yJawPos, MUindx):
 
 
 def syncmlcSeq(timeStamp, leafPos, MUindx, SCD, SAD, leafRadius, is_static, physicalLeafOffset):
-    # syncmlcSeq for Varian TrueBeam and Clinac iX, valid for the BEAMnrc CMs SYNCVMLC and SYNCHDMLC
+    # syncmlcSeq for Varian TrueBeam and Clinac iX, valid for the BEAMnrc CMs SYNCVMLC andde SYNCHDMLC
     numCtrlPts = len(flatten(MUindx))
     bankA, bankB = calcMLCphysPos(leafPos, SAD, SCD, leafRadius, is_static,
     physicalLeafOffset, numCtrlPts)
