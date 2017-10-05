@@ -1,4 +1,4 @@
-BEAM_TB_jaws
+BEAM_TB
 AIR700ICRU
 0, 0, 0, {phspType}, 0, 3, 1,  IWATCH ETC. phspType=4
 {NCASE}, {IXXIN}, {JXXIN}, 999, 0, 0, 0, 0,  NCASE ETC.
@@ -6,10 +6,10 @@ AIR700ICRU
 {phsp}
 0, 0, 0.7, 0.01, 0, 1, 1.0,  0 , ECUT,PCUT,IREJCT,ESAVE
 0, 0, 0, 0, 0,  PHOTON FORCING
-1, 3,  SCORING INPUT
+1, 5,  SCORING INPUT
 0,1
 0,  DOSE COMPONENTS
-26.7, Z TO FRONT FACE (should correlate with Z of phsp)
+26.7, Z TO FRONT FACE
 *********** start of CM SLABS with identifier airGap1  ***********
 30, RMAX
 Thin Air slab
@@ -35,6 +35,37 @@ AirSlab to end
 1, NSLABS
 44.51168, ZMIN
 0.48832, 0.7, 0.01, 0, 0, 0
+AIR700ICRU
+*********** start of CM SYNCVMLC with identifier MLC  ***********
+20.5, RMAX
+Millenium MLC - 120 leaves
+1, 3, 1, ORIENT, NGROUP, MODE
+50.81956, ZMIN
+6.66, ZTHICK
+0.50610, 0.04000, 0.04000, 0.13500, 0.36900, 0.14000, 50.97956, 51.09956, 54.08956, 54.29956, 55.47956, 55.90956, 1.70000, 57.09956, 57.37956,
+0.24900, 0.04000, 0.04000, 0.10500, 0.14500, 0.14600, 50.91956, 51.17956, 53.51956, 53.84956, 1.70000, 54.18956, 54.19956, 57.19956, 57.31956,
+0.25000, 0.04000, 0.04000, 0.07500, 0.14000, 0.14000, 50.81956, 50.93956, 54.23956, 54.33956, 55.71956, 56.04956, 1.70000, 56.95956, 57.21956,
+10, 1
+40, 2
+10, 1
+-10.20454, START
+0.0046, LEAFGAP
+0, ENDTYPE
+8.0, ZFOCUS or RADIUS of leaf ends
+0, ZFOCUS of leaf sides
+syncmlcSequence
+0.7, 0.01, 0, 0, 
+AIR700ICRU
+0.7, 0.01, 0, 0, 0, 
+MLC17.32
+0.7, 0.01, 0, 0, 
+AIR700ICRU
+*********** start of CM SLABS with identifier airGap3  ***********
+30, RMAX
+Air Slab 1
+1, NSLABS
+64, ZMIN
+1, 0.7, 0.01, 0, 0, 0
 AIR700ICRU
 *********************end of all CMs*****************************
  #########################

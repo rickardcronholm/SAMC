@@ -31,6 +31,7 @@ import DICOM2egsinp_s20
 import subprocess
 import tarfile
 import copy
+import logging
 
 
 # get current time
@@ -51,6 +52,12 @@ else:
     flock = open(lockFile, 'w')
     flock.write('Busy\n')
     flock.close()
+
+# logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger('daemonA')
+logger.setLevel(logging.WARNING)
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 
 # get variables from confFile
 confFile = 'samc.conf'
@@ -81,22 +88,32 @@ samcMove = samcUtil.getVariable(confFile,'daemonA.samcMove')
 logFile = samcUtil.getVariable(confFile,'daemonA.logFile')
 kt = samcUtil.getVariable(confFile,'daemonA.keepTrack')
 '''
+
+# check connectivity to cluster front end
+clusterIP = cv.clusterFrontEnd.split(':')[0].split('@')[-1]
+if not samcUtil.isOpen(clusterIP):
+    with open('daemonA.log', 'a') as flock:
+        flock.write('daemonA not able to connect to cluster')
+    os.remove(lockFile)
+    sys.exit(0)
+
+# check if DICOMinDir exists, otherwise create it
+if not os.path.exists(cv.DICOMinDir):
+    os.makedirs(cv.DICOMinDir)
+
 # check that DICOMinDir is constant
 #new = glob.glob(os.path.join(cv.DICOMinDir, '*'))
-new = sum(os.path.getsize(f) for f in os.listdir(cv.DICOMinDir)
-if os.path.isfile(f))
+new = sum(os.path.getsize(os.path.join(cv.DICOMinDir,f)) for f in os.listdir(cv.DICOMinDir) 
+if os.path.isfile(os.path.join(cv.DICOMinDir,f)))
 while True:
     print 'sleeping'
-    time.sleep(15)
+    time.sleep(60)
     old = copy.deepcopy(new)
     #new = glob.glob(os.path.join(cv.DICOMinDir, '*'))
-    new = sum(os.path.getsize(f) for f in os.listdir(cv.DICOMinDir)
-    if os.path.isfile(f))
+    new = sum(os.path.getsize(os.path.join(cv.DICOMinDir,f)) 
+    for f in os.listdir(cv.DICOMinDir) if os.path.isfile(os.path.join(cv.DICOMinDir,f)))
     if new == old:
         break
-
-subprocess.call(['sudo', cv.samcMove])
-# os.system('sudo %(cv.samcMove)s' %locals())
 
 # get time of last run
 f = open(cv.timeFile, 'r')
@@ -104,9 +121,6 @@ oldTime = f.readline().rstrip()
 print 'This was last run at {0}'.format(oldTime)
 f.close()
 
-# check if DICOMinDir exists, otherwise create it
-if not os.path.exists(cv.DICOMinDir):
-    os.makedirs(cv.DICOMinDir)
 
 # get list of RPfiles
 RPfiles = []
@@ -139,204 +153,220 @@ for i in range(0, len(RPfiles)):
     print 'timeStamp: ',timeStamp
     sys.stdout.flush()
 
-    RP = dicom.read_file(cv.DICOMinDir + RPfiles[i])
-    # get SOPInstanceUID
-    planSOP = RP.SOPInstanceUID
+    try:
 
-    # validate plan
-    valid = samcUtil.validateRP(RP)
-    if not valid:
-        print 'Invalid RP'
-        #continue # skip to next RP
-    else:
-        print 'Valid RP'
+        RP = dicom.read_file(cv.DICOMinDir + RPfiles[i])
+        # get SOPInstanceUID
+        planSOP = RP.SOPInstanceUID
 
-    # find RDs for the current RP
-    RDfiles = []
-    for file in [fileList for fileList in os.listdir(cv.DICOMinDir) if fileList.endswith(cv.DICOMfileEnding) and fileList.startswith(cv.RDfilePrefix)]:
-        RDfiles.append(file)
-    myRDs = []
-    fieldRDs = []
-    planRDs = []
-    # append to list if the RD referrs to SOPInstanceUID
-    for j in range(0, len(RDfiles)):
-        RD = dicom.read_file(cv.DICOMinDir + RDfiles[j],
-             stop_before_pixels=True)
-        if (planSOP == RD.ReferencedRTPlanSequence[0].ReferencedSOPInstanceUID):
-            try:
-                beam = float(RD.ReferencedRTPlanSequence[0].ReferencedFractionGroupSequence[0].ReferencedBeamSequence[0].ReferencedBeamNumber)
-            except AttributeError:
-                beam = 0
-            if (beam > 0):
-                fieldRDs.append(RDfiles[j])
-            else:
-                planRDs.append(RDfiles[j])
+        # validate plan
+        valid = samcUtil.validateRP(RP)
+        if not valid:
+            print 'Invalid RP'
+            #continue # skip to next RP
+        else:
+            print 'Valid RP'
 
-    if len(planRDs) == 0 and len(fieldRDs) == 0:
-        print 'No RD file found, skipping RP'
-        valid = False
+        # find RDs for the current RP
+        RDfiles = []
+        for file in [fileList for fileList in os.listdir(cv.DICOMinDir) if fileList.endswith(cv.DICOMfileEnding) and fileList.startswith(cv.RDfilePrefix)]:
+            RDfiles.append(file)
+        myRDs = []
+        fieldRDs = []
+        planRDs = []
+        # append to list if the RD referrs to SOPInstanceUID
+        for j in range(0, len(RDfiles)):
+            RD = dicom.read_file(cv.DICOMinDir + RDfiles[j],
+                 stop_before_pixels=True)
+            if (planSOP == RD.ReferencedRTPlanSequence[0].ReferencedSOPInstanceUID):
+                try:
+                    beam = float(RD.ReferencedRTPlanSequence[0].ReferencedFractionGroupSequence[0].ReferencedBeamSequence[0].ReferencedBeamNumber)
+                except AttributeError:
+                    beam = 0
+                if (beam > 0):
+                    fieldRDs.append(RDfiles[j])
+                else:
+                    planRDs.append(RDfiles[j])
 
-    # if planDose found, use it otherwise use fieldDose and remove others
-    if len(planRDs) == 1:
-        myRDs = planRDs
-        for j in range(0, len(fieldRDs)):
-            os.remove(cv.DICOMinDir + fieldRDs[j])
-    else:
-        myRDs = fieldRDs
-        for j in range(0, len(planRDs)):
-            os.remove(cv.DICOMinDir + planRDs[j])
+        if len(planRDs) == 0 and len(fieldRDs) == 0:
+            print 'No RD file found, skipping RP'
+            valid = False
 
-    # check if CTs and RS correlated to the RP exists, if so create egsphant
-    createPhant = False # flag determining weather to generate an egsphant or not
-    CTfiles = []
-    for file in [fileList for fileList in os.listdir(cv.DICOMinDir) if fileList.endswith(cv.DICOMfileEnding) and fileList.startswith(cv.CTfilePrefix)]:
-        CTfiles.append(file)
-    myCTs = []
-    # append to list if the CT referrs to RP.StudyInstanceUID
-    for j in range(0, len(CTfiles)):
-        CT = dicom.read_file(cv.DICOMinDir + CTfiles[j],
-        stop_before_pixels=True)
-        if (RP.FrameOfReferenceUID == CT.FrameOfReferenceUID):
-            myCTs.append(CTfiles[j])
-    CTfiles = myCTs
-    if len(CTfiles) > 0:
-        createPhant = True
-    else:
-        myRSs = []
+        # if planDose found, use it otherwise use fieldDose and remove others
+        if len(planRDs) == 1:
+            myRDs = planRDs
+            for j in range(0, len(fieldRDs)):
+                os.remove(cv.DICOMinDir + fieldRDs[j])
+        else:
+            myRDs = fieldRDs
+            for j in range(0, len(planRDs)):
+                os.remove(cv.DICOMinDir + planRDs[j])
 
-    if createPhant:
-        CT = dicom.read_file(cv.DICOMinDir + CTfiles[0])
-        RPRDfile = cv.DICOMinDir + timeStamp + 'RPRD.txt'
-        RSfileOut = cv.DICOMinDir + timeStamp + 'RS.txt'
-        CTsliceListFile = cv.DICOMinDir + timeStamp + 'CTs.txt'
-        # generate the RPRDfile
-        f = open(RPRDfile, 'w')
-        f.write('{0}{1}\n'.format(cv.DICOMinDir, RPfiles[i]))
-        try:
-            f.write('{0}{1}\n'.format(cv.DICOMinDir, myRDs[0]))
-        except IndexError:
-            pass
-        f.close()
-
-        # get RS file that corresponds to the RP
-        RSfiles = []
-        for file in [fileList for fileList in os.listdir(cv.DICOMinDir) if fileList.endswith(cv.DICOMfileEnding) and fileList.startswith(cv.RSfilePrefix)]:
-            RSfiles.append(file)
-        myRSs = []
-        # append to list if the RS referrs to RP.StudyInstanceUID
-        for j in range(0, len(RSfiles)):
-            RS = dicom.read_file(cv.DICOMinDir + RSfiles[j],
+        # check if CTs and RS correlated to the RP exists, if so create egsphant
+        createPhant = False # flag determining weather to generate an egsphant or not
+        CTfiles = []
+        for file in [fileList for fileList in os.listdir(cv.DICOMinDir) if fileList.endswith(cv.DICOMfileEnding) and fileList.startswith(cv.CTfilePrefix)]:
+            CTfiles.append(file)
+        myCTs = []
+        # append to list if the CT referrs to RP.StudyInstanceUID
+        for j in range(0, len(CTfiles)):
+            CT = dicom.read_file(cv.DICOMinDir + CTfiles[j],
             stop_before_pixels=True)
-            if (CT.StudyInstanceUID == RS.StudyInstanceUID):
-                myRSs.append(RSfiles[j])
-        try:
-            RSfile = myRSs[0]
-        except IndexError:
-            RSfile = ''
+            if (RP.FrameOfReferenceUID == CT.FrameOfReferenceUID):
+                myCTs.append(CTfiles[j])
+        CTfiles = myCTs
+        if len(CTfiles) > 0:
+            createPhant = True
+        else:
+            myRSs = []
 
-        # generate the RSfile
-        f = open(RSfileOut, 'w')
-        f.write('{0}{1}\n'.format(cv.DICOMinDir, RSfile))
-        f.close()
-        # generate the CTsliceListFile
-        f = open(CTsliceListFile, 'w')
-        for j in range(0,len(CTfiles)):
-            f.write('{0}{1}\n'.format(cv.DICOMinDir, CTfiles[j]))
-        f.close()
+        recycle = 0
+        if createPhant:
+            CT = dicom.read_file(cv.DICOMinDir + CTfiles[0])
+            RPRDfile = cv.DICOMinDir + timeStamp + 'RPRD.txt'
+            RSfileOut = cv.DICOMinDir + timeStamp + 'RS.txt'
+            CTsliceListFile = cv.DICOMinDir + timeStamp + 'CTs.txt'
+            # generate the RPRDfile
+            f = open(RPRDfile, 'w')
+            f.write('{0}{1}\n'.format(cv.DICOMinDir, RPfiles[i]))
+            try:
+                f.write('{0}{1}\n'.format(cv.DICOMinDir, myRDs[0]))
+            except IndexError:
+                pass
+            f.close()
 
-        # generate the phanton
-        if len(myRSs) > 0 and valid:
-            CTC_auto.main(RPRDfile, RSfileOut, CTsliceListFile, timeStamp, [
-                'BOLUS', 'NONE', 'CAVITY', 'CONTROL', 'AVOIDANCE', 'CONTRAST AGENT'],
-                ['onlyWater.dat', '21media+TIT.dat', '21media+TIT.dat',
-                '21media+TIT.dat', '21media+TIT.dat', '21media+TIT.dat'])
+            # get RS file that corresponds to the RP
+            RSfiles = []
+            for file in [fileList for fileList in os.listdir(cv.DICOMinDir) if fileList.endswith(cv.DICOMfileEnding) and fileList.startswith(cv.RSfilePrefix)]:
+                RSfiles.append(file)
+            myRSs = []
+            # append to list if the RP referrs to RS
+            for j in range(0, len(RSfiles)):
+                RS = dicom.read_file(cv.DICOMinDir + RSfiles[j],
+                stop_before_pixels=True)
+                if (RP.ReferencedStructureSetSequence[0].ReferencedSOPInstanceUID == RS.SOPInstanceUID):
+                    myRSs.append(RSfiles[j])
+            try:
+                RSfile = myRSs[0]
+            except IndexError:
+                RSfile = ''
 
-            # cleanup
-            # check for recycling here and delete iff recycling not called for
-            if i + 1 < len(RPfiles):
-                recycle = samcUtil.recycleCTandRS(CT.FrameOfReferenceUID,
-                cv.DICOMinDir, RPfiles[i + 1:len(RPfiles)])
-            else:
-                recycle = 0
-            if recycle == 0:
-                # os.remove(DICOMinDir+RSfile)
-                samcUtil.remove(cv.DICOMinDir, CTfiles)
+            # generate the RSfile
+            f = open(RSfileOut, 'w')
+            f.write('{0}{1}\n'.format(cv.DICOMinDir, RSfile))
+            f.close()
+            # generate the CTsliceListFile
+            f = open(CTsliceListFile, 'w')
+            for j in range(0,len(CTfiles)):
+                f.write('{0}{1}\n'.format(cv.DICOMinDir, CTfiles[j]))
+            f.close()
 
-        # remove textfiles used by CTC_ask
-        for fl in glob.glob(cv.DICOMinDir + timeStamp + "*"):
-            os.remove(fl)
+            # generate the phanton
+            if len(myRSs) > 0 and valid:
+                CTC_auto.main(RPRDfile, RSfileOut, CTsliceListFile, timeStamp, [
+                    'BOLUS', 'NONE', 'CAVITY', 'CONTROL', 'AVOIDANCE', 'CONTRAST AGENT', 'DOSE_REGION', 'CTV'],
+                    ['onlyWater.dat', '21media+TIT.dat', '21media+TIT.dat',
+                    '21mediaNoCouch+AU.dat', '21media+TIT.dat', '21media+TIT.dat', '21media+TIT.dat',
+                    '21mediaNoCouch+AU.dat'])
 
-    # remove files if failed during phantom creation
-    if createPhant and not os.path.isfile(timeStamp+'.egs4phant'):
-        print 'Failed during phantom generation. Quitting'
-        valid = False
+                # cleanup
+                # check for recycling here and delete iff recycling not called for
+                if i + 1 < len(RPfiles):
+                    recycle = samcUtil.recycleCTandRS(CT.FrameOfReferenceUID,
+                    cv.DICOMinDir, RPfiles[i + 1:len(RPfiles)])
+                else:
+                    recycle = 0
+                if recycle == 0:
+                    # os.remove(DICOMinDir+RSfile)
+                    samcUtil.remove(cv.DICOMinDir, CTfiles)
 
-    # remove all DICOM files if invalid
-    # (invalid plan, missing dose, failed phantom creation)
-    if not valid:
+            # remove textfiles used by CTC_ask
+            for fl in glob.glob(cv.DICOMinDir + timeStamp + "*"):
+                os.remove(fl)
+
+        # remove files if failed during phantom creation
+        if createPhant and not os.path.isfile(timeStamp+'.egs4phant'):
+            print 'Failed during phantom generation. Quitting'    
+            valid = False
+
+        # remove all DICOM files if invalid
+        # (invalid plan, missing dose, failed phantom creation)
+        if not valid:
+            samcUtil.remove(cv.DICOMinDir, RPfiles[i])  # RP
+            samcUtil.remove(cv.DICOMinDir, myRDs)  # RD
+            samcUtil.remove(cv.DICOMinDir, myRSs)  # RS
+            samcUtil.remove(cv.DICOMinDir, myCTs)  # CT    
+            continue  # skip to next RP
+
+        # create directory
+        if not os.path.exists(timeStamp):
+            os.makedirs(timeStamp)
+
+        # move files to $timeStamp directory
+        # shutil.copy2(thisDir + RPfiles[i], timeStamp)
+        shutil.move(cv.DICOMinDir + RPfiles[i], timeStamp)
+        for j in range(len(myRDs)):
+            shutil.move(cv.DICOMinDir + myRDs[j], timeStamp)
+        if createPhant and len(myRSs) > 0:
+            shutil.copy(cv.DICOMinDir + myRSs[0], timeStamp)
+
+        # initiate conversion to MC input files + utility files
+        currRPfile = os.path.sep.join([timeStamp, RPfiles[i]])
+        numDoseFiles = len(myRDs)
+        DICOM2egsinp_s20.main(currRPfile, timeStamp, numDoseFiles)
+
+        # change referenced egs4phant if phantom was created
+        if createPhant:
+            defaultPhant = samcUtil.getVariable(confFile, 'convertScript.egsPhant')
+            specificPhant = timeStamp + '.egs4phant'
+            cmd = "sed -i 's/"+defaultPhant+"/"+specificPhant+"/g' "+timeStamp+"/"+timeStamp+"*DOSXYZnrc.egsinp"
+            os.system(str(cmd))
+
+        '''
+        if os.path.isfile(''.join([timeStamp,'/',timeStamp,'.keepTrack'])):
+            thisKT = ''.join([timeStamp,'/',timeStamp,'.keepTrack'])
+            if i == 0:  # overwrite existing file
+                os.remove(cv.keepTrack)
+            os.system('cat %(thisKT)s >> %(kt)s' %locals())
+        '''
+        # Copy samc.conf to instance specific conf
+        shutil.copy(confFile, os.path.join(timeStamp,timeStamp+'.conf'))
+
+        # tar files
+        tarTypes = [os.path.sep.join([timeStamp, timeStamp + '*'])]
+        tarFiles = []
+        for name in tarTypes:
+            tarFiles.append(glob.glob(name))
+        tarFiles = samcUtil.flatten(tarFiles)
+        tarFileName = ''.join(['preSim', timeStamp, '.tar'])
+        tar = tarfile.open(tarFileName, 'w')
+        for name in tarFiles:
+            tar.add(name)
+        tar.close()
+        recipient = os.path.sep.join([cv.clusterFrontEnd, timeStamp + '.tar'])
+        #os.system('tar cf %(tarFileName)s %(tarFiles)s' %locals())
+
+        # scp to cluster front end
+        # os.system('scp %(tarFileName)s %(recipient)s' %locals())
+        subprocess.call(['scp', tarFileName, recipient])
+        # delete tar file
+        os.remove(tarFileName)
+
+        # remove DICOM files from DICOMinDir
         samcUtil.remove(cv.DICOMinDir, RPfiles[i])  # RP
         samcUtil.remove(cv.DICOMinDir, myRDs)  # RD
-        samcUtil.remove(cv.DICOMinDir, myRSs)  # RS
-        samcUtil.remove(cv.DICOMinDir, myCTs)  # CT
-        continue  # skip to next RP
+        if recycle == 0:
+            samcUtil.remove(cv.DICOMinDir, myRSs)  # RS
+            samcUtil.remove(cv.DICOMinDir, myCTs)  # CT
+        else:
+            print 'Not removing CT+RS due to recycling'
 
-    # create directory
-    if not os.path.exists(timeStamp):
-        os.makedirs(timeStamp)
-
-    # move files to $timeStamp directory
-    # shutil.copy2(thisDir + RPfiles[i], timeStamp)
-    shutil.move(cv.DICOMinDir + RPfiles[i], timeStamp)
-    for j in range(len(myRDs)):
-        shutil.move(cv.DICOMinDir + myRDs[j], timeStamp)
-    if createPhant and len(myRSs) > 0:
-        shutil.copy(cv.DICOMinDir + myRSs[0], timeStamp)
-
-    # initiate conversion to MC input files + utility files
-    currRPfile = os.path.sep.join([timeStamp, RPfiles[i]])
-    numDoseFiles = len(myRDs)
-    DICOM2egsinp_s20.main(currRPfile, timeStamp, numDoseFiles)
-
-    # change referenced egs4phant if phantom was created
-    if createPhant:
-        defaultPhant = samcUtil.getVariable(confFile, 'convertScript.egsPhant')
-        specificPhant = timeStamp + '.egs4phant'
-        cmd = "sed -i 's/"+defaultPhant+"/"+specificPhant+"/g' "+timeStamp+"/"+timeStamp+"*DOSXYZnrc.egsinp"
-        os.system(str(cmd))
-
-    '''
-    if os.path.isfile(''.join([timeStamp,'/',timeStamp,'.keepTrack'])):
-        thisKT = ''.join([timeStamp,'/',timeStamp,'.keepTrack'])
-        if i == 0:  # overwrite existing file
-            os.remove(cv.keepTrack)
-        os.system('cat %(thisKT)s >> %(kt)s' %locals())
-    '''
-
-    # tar files
-    tarTypes = [os.path.sep.join([timeStamp, timeStamp + '*'])]
-    tarFiles = []
-    for name in tarTypes:
-        tarFiles.append(glob.glob(name))
-    tarFiles = samcUtil.flatten(tarFiles)
-    tarFileName = ''.join(['preSim', timeStamp, '.tar'])
-    tar = tarfile.open(tarFileName, 'w')
-    for name in tarFiles:
-        tar.add(name)
-    tar.close()
-    recipient = os.path.sep.join([cv.clusterFrontEnd, timeStamp + '.tar'])
-    #os.system('tar cf %(tarFileName)s %(tarFiles)s' %locals())
-
-    # scp to cluster front end
-    # os.system('scp %(tarFileName)s %(recipient)s' %locals())
-    subprocess.call(['scp', tarFileName, recipient])
-    # delete tar file
-    os.remove(tarFileName)
-
-    # remove DICOM files from DICOMinDir
-    samcUtil.remove(cv.DICOMinDir, RPfiles[i])  # RP
-    samcUtil.remove(cv.DICOMinDir, myRDs)  # RD
-    samcUtil.remove(cv.DICOMinDir, myRSs)  # RS
-    samcUtil.remove(cv.DICOMinDir, myCTs)  # CT
+    except Exception as exc:
+        hdlr = logging.FileHandler('.'.join([timeStamp, 'log']))
+        hdlr.setFormatter(formatter)
+        logger.addHandler(hdlr)
+        logger.exception(exc)
+        logger.handlers = []
 
 # update time of last run
 samcUtil.writeTimeToFile(cv.timeFile, newTime)

@@ -57,10 +57,12 @@ def main(fileName, timeStamp, singularityFlag = 0, zeroAngles = 0, changeUnit = 
     # get variables from global confFile
     with open(confFile) as f:
         confCont = f.readlines()
-    whatToGet = ['convertScript.treatmentMachineLibrary', 'common.EGS_HOME', 'common.VCUinp', 'common.phspDir',
+    whatToGet = ['convertScript.treatmentMachineLibrary', 'common.EGS_HOME', 'common.phspDir',
      'convertScript.ncaseBeam', 'convertScript.ncaseDos', 'convertScript.egsPhant', 'convertScript.mlcLib',
      'convertScript.dSource', 'common.templateDir']
     conf = samcUtil.getConfVars(conf, whatToGet, confCont)
+    # convert types
+    conf = samcUtil.typeCast(conf, ['ncaseDos'], [int])
 
     # get relevant data from DICOM file
 
@@ -188,22 +190,13 @@ def main(fileName, timeStamp, singularityFlag = 0, zeroAngles = 0, changeUnit = 
         samcUtil.numBeams(timeStamp,1)
 
         # write absCalib
-        ROFcorr = 1.0
-        conf.ROFcorr = samcUtil.getVariable(treatmentMachine,
-        ''.join(['ROFcorr',nomEnfluMod[0]]))
-        if hasattr(conf, 'ROFcorr') and conf.ROFcorr:
-            xSize = np.mean(np.asarray([-x[0][0] + x[0][1] for x in xJawPos]))
-            ySize = np.mean(np.asarray([-x[0][0] + x[0][1] for x in yJawPos]))
-            coeff = map(float, conf.ROFcorr.split(','))
-            ROFcorr = polyval2D.polyVal2D(coeff, xSize, ySize, 2, 2)
-            print ROFcorr
         samcUtil.absCalib(timeStamp, treatmentMachine, nomEnfluMod[0], MUs,
-        nFrac, ROFcorr)
+        nFrac)
         #os.rename(''.join([timeStamp,'destination')
 
         # write BEAMnrc egsinp
         #print timeStamp
-        (beamDir,phspType) = samcUtil.BEAMegsinp(timeStamp,conf.templateType,conf.TreatmentMachineType,nomEnfluMod[0],conf.phspDir,conf.EGS_HOME,conf.ncaseBeam)
+        (beamDir,phspType, phspName) = samcUtil.BEAMegsinp(timeStamp,conf.templateType,conf.TreatmentMachineType,nomEnfluMod[0],conf.phspDir,conf.EGS_HOME,conf.ncaseBeam)
 
         if phspType == 0:
             phspEnd = '.egsphsp1'
@@ -212,13 +205,18 @@ def main(fileName, timeStamp, singularityFlag = 0, zeroAngles = 0, changeUnit = 
 
 
         # write SYNCJAW sequence, only implemented for TB and IX
-        if sum(EDW) > 0:
-            if conf.TreatmentMachineType == 'TB' or conf.TreatmentMachineType == 'IX':
+        if conf.TreatmentMachineType == 'TB' or conf.TreatmentMachineType == 'IX':
+            if sum(EDW) > 0:
                 samcUtil.syncjawSeq(timeStamp,xJawPos,yJawPos,MUindxJaw)
-        else:
-            if conf.TreatmentMachineType == 'TB' or conf.TreatmentMachineType == 'IX':
+            else:
                 samcUtil.syncjawSeq(timeStamp,xJawPos,yJawPos,MUindx)
+        # write SYNCMLC sequence (either SYNCVMLC or SYNCHDMLC), only implemented for TB and IX
+        if conf.TreatmentMachineType == 'TB' or conf.TreatmentMachineType == 'IX':
+			samcUtil.syncmlcSeq(timeStamp,leafPos,MUindx,conf.SCD,conf.SAD,conf.leafRadius, is_static, conf.physLeafOffset)
 
+        # The concept of dividing the Linacc head simulation in two parts is abandonned as of v0.5.3
+        # Everything should now be contained in on BEAMnrc.egsinp file
+        '''
         if conf.mlcLib == 'particleDmlc':  # No longer preferred, no template included
             # write VCUmlc.txt
             samcUtil.vcuTXT(timeStamp,conf.TreatmentMachineType,conf.EGS_HOME,beamDir,conf.VCUinp,phspEnd)
@@ -242,9 +240,9 @@ def main(fileName, timeStamp, singularityFlag = 0, zeroAngles = 0, changeUnit = 
             MLCseq = ''.join([conf.EGS_HOME, conf.mlcLib,'/',timeStamp,'_BEAMnrc.mlc'])
             # write SYNCMLC sequence
             samcUtil.syncmlcSeq(timeStamp,leafPos,MUindx,conf.SCD,conf.SAD,conf.leafRadius, is_static, conf.physLeafOffset)
-
+        '''
         # write DOSXYZnrc egsinp
-        samcUtil.DOSXYZegsinp(timeStamp,conf.EGS_HOME,conf.egsPhant,conf.mlcLib,beamDir,phspEnd,conf.VCUinp,ISO,gantry,couch,coll,MUindx,conf.dSource,conf.ncaseDos,PatientPosition)
+        samcUtil.DOSXYZegsinp(timeStamp,conf.EGS_HOME,conf.egsPhant,conf.mlcLib,beamDir,phspName,conf.mlcLib,ISO,gantry,couch,coll,MUindx,conf.dSource,conf.ncaseDos,PatientPosition)
 
         # look for backscatter file and create if template exist for treatmentMachineType and nomEnflu
         if os.path.isfile(''.join(['template/',conf.TreatmentMachineType,'_',nomEnfluMod[0],'.bs'])):
@@ -252,21 +250,14 @@ def main(fileName, timeStamp, singularityFlag = 0, zeroAngles = 0, changeUnit = 
     else:
         # write numBeams
         samcUtil.numBeams(timeStamp,len(corrBeams))
+        print corrBeams, treatmentMachine, nomEnfluMod
 
         for i in range(0,len(corrBeams)):
 
             # write absCalib
-            ROFcorr = 1.0
-            conf.ROFcorr = samcUtil.getVariable(treatmentMachine,
-            ''.join(['ROFcorr',nomEnfluMod[corrBeams[i]]]))
-            if hasattr(conf, 'ROFcorr')  and conf.ROFcorr:
-                xSize = [-x[0] + x[1] for x in xJawPos[corrBeams[i]]][0]
-                ySize = [-x[0] + x[1] for x in yJawPos[corrBeams[i]]][0]
-                coeff = map(float, conf.ROFcorr.split(','))
-                ROFcorr = polyval2D.polyVal2D(coeff, xSize, ySize, 2, 2)
             samcUtil.absCalib(''.join([timeStamp,'_', str(corrBeams[i])]),
             treatmentMachine, nomEnfluMod[corrBeams[i]], [MUs[corrBeams[i]]],
-            nFrac, ROFcorr)
+            nFrac)
             #os.rename(''.join([timeStamp,'destination')
 
             # write BEAMnrc egsinp
@@ -279,13 +270,16 @@ def main(fileName, timeStamp, singularityFlag = 0, zeroAngles = 0, changeUnit = 
                 phspEnd = '.1.IAEAphsp'
 
             # write SYNCJAW sequence, only implemented for TB and IX
-            if sum(EDW) > 0:
-                if conf.TreatmentMachineType == 'TB' or conf.TreatmentMachineType == 'IX':
+            if conf.TreatmentMachineType == 'TB' or conf.TreatmentMachineType == 'IX':
+                if sum(EDW) > 0:
                     samcUtil.syncjawSeq(''.join([timeStamp,'_',str(corrBeams[i])]),[xJawPos[corrBeams[i]]],[yJawPos[corrBeams[i]]],[MUindxJaw[corrBeams[i]]])
-            else:
-                if conf.TreatmentMachineType == 'TB' or conf.TreatmentMachineType == 'IX':
+                else:
                     samcUtil.syncjawSeq(''.join([timeStamp,'_',str(corrBeams[i])]),[xJawPos[corrBeams[i]]],[yJawPos[corrBeams[i]]],[MUindx[corrBeams[i]]])
+            # write SYNCMLC sequence (either SYNCVMLC or SYNCHDMLC), only implemented for TB and IX
+            if conf.TreatmentMachineType == 'TB' or conf.TreatmentMachineType == 'IX':
+			    samcUtil.syncmlcSeq(''.join([timeStamp,'_',str(corrBeams[i])]),[leafPos[corrBeams[i]]],[MUindx[corrBeams[i]]],conf.SCD,conf.SAD,conf.leafRadius, [is_static[corrBeams[i]]], conf.physLeafOffset)
 
+            '''
             if conf.mlcLib == 'particleDmlc':  # No longer preferred, no template included
                 # write VCUmlc.txt
                 samcUtil.vcuTXT(''.join([timeStamp,'_',str(corrBeams[i])]),conf.TreatmentMachineType,conf.EGS_HOME,beamDir,conf.VCUinp,conf.phspEnd)
@@ -310,9 +304,10 @@ def main(fileName, timeStamp, singularityFlag = 0, zeroAngles = 0, changeUnit = 
                 MLCseq = ''.join([conf.EGS_HOME,conf.mlcLib,'/',''.join([timeStamp,'_',str(corrBeams[i])]),'_BEAMnrc.mlc'])
                 # write SYNCMLC sequence
                 samcUtil.syncmlcSeq(''.join([timeStamp,'_',str(corrBeams[i])]),[leafPos[corrBeams[i]]],[MUindx[corrBeams[i]]],conf.SCD,conf.SAD,conf.leafRadius, [is_static[corrBeams[i]]], conf.physLeafOffset)
-
+            '''
+            
             # write DOSXYZnrc egsinp
-            samcUtil.DOSXYZegsinp(''.join([timeStamp,'_',str(corrBeams[i])]),conf.EGS_HOME,conf.egsPhant,conf.mlcLib,beamDir,phspEnd,conf.VCUinp,ISO[corrBeams[i]],gantry[corrBeams[i]],couch[corrBeams[i]],coll[corrBeams[i]],MUindx[corrBeams[i]],conf.dSource,conf.ncaseDos,PatientPosition)
+            samcUtil.DOSXYZegsinp(''.join([timeStamp,'_',str(corrBeams[i])]),conf.EGS_HOME,conf.egsPhant,conf.mlcLib,beamDir,phspEnd,conf.mlcLib,ISO[corrBeams[i]],gantry[corrBeams[i]],couch[corrBeams[i]],coll[corrBeams[i]],MUindx[corrBeams[i]],conf.dSource,conf.ncaseDos,PatientPosition)
 
             # look for backscatter file and create if template exist for treatmentMachineType and nomEnflu
             if os.path.isfile(''.join(['template/',conf.TreatmentMachineType,'_',nomEnfluMod[corrBeams[i]],'.bs'])):

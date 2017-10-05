@@ -1,6 +1,6 @@
 #!/bin/sh
 
-/usr/local/bin/python /home/mcqa/MCQA/daemonE_exec.py
+/usr/bin/python /home/mcqa/MCQA/daemonE_exec.py
 status=$?
 
 if [ "$status" -gt 0 ];

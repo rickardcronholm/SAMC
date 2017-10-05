@@ -2,11 +2,11 @@ dosxyznrc
 0
 {myEgsphant}
 0.700, 0.01, 0
-0, 0, 0, 
+1, 0, 1, zeroairdose etc
 2,  20, {myNumCtrlPts},   0,   0,   0,   0,   0,   0,
 2, 2, _medSurr_, 80, 0, 0, 0, 0, medsurr is determined at run time by look up in the egsphant file
 {myMlcLib},{myPhsp},{myVcuTxt}
-{NCASE}, 0, 999, {IXXIN}, {JXXIN}, 100, 0, 0, 1, 1, 1, 0, 0, 0, 25, 0,
+{NCASE}, 0, 999, {IXXIN}, {JXXIN}, 100, 0, 0, 1, 1, 1, 0, 0, 0, 25, 0, 0, NCASE etc
  #########################
  :Start MC Transport Parameter:
  

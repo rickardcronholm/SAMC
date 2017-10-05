@@ -8,6 +8,7 @@ import os
 import random
 import dicom
 import numpy as np
+import socket
 
 # config file path goes here
 confFile = 'samc.conf'
@@ -357,7 +358,7 @@ def beamDir(timeStamp, beamDir, suffix):
     return
 
 
-def absCalib(timeStamp, machineName, eflu, MUs, nFrac, corr):
+def absCalib(timeStamp, machineName, eflu, MUs, nFrac):
     fileName = ''.join([timeStamp, '.absCalib'])
     fout = open(fileName, 'w')
     with open(machineName, 'r') as fmachine:
@@ -368,7 +369,7 @@ def absCalib(timeStamp, machineName, eflu, MUs, nFrac, corr):
         if s.startswith(lookFor)][0]].split(' ')[-1].rstrip())
     except IndexError:
         absCalib = 1.0  # set to unity if no matched found
-    fout.write(str(absCalib * math.fsum(MUs) * nFrac * corr))
+    fout.write(str(absCalib * math.fsum(MUs) * nFrac))
     fout.close()
     return
 
@@ -399,8 +400,9 @@ def BEAMegsinp(timeStamp, templateType, machineType, nomEnfluMod, phspDir, EGS_H
         if not thisLine:
             break
         if thisLine.find('{phsp}') >= 0:
-            thisLine = thisLine.format(phsp=''.join([phspDir,
-            machineType, '_', nomEnfluMod, phspInType]))
+	    phspName = ''.join([phspDir,
+            machineType, '_', nomEnfluMod, phspInType])
+            thisLine = thisLine.format(phsp=phspName)
         if thisLine.find('phspType=') > 0:
             phspType = int(thisLine[thisLine.rindex('phspType=') + len('phspType=')])
             thisLine = thisLine.format(phspType=phspType)
@@ -424,10 +426,10 @@ def BEAMegsinp(timeStamp, templateType, machineType, nomEnfluMod, phspDir, EGS_H
         fOut.write(thisLine)
     fOut.close()
     fIn.close()
-    return (beamDir, phspType)
+    return (beamDir, phspType, phspName)
 
 
-def DOSXYZegsinp(timeStamp, EGS_HOME, egsPhant, mlcLib, beamDir, phspEnd, VCUinp, ISO, gantry, couch, coll, MUindx, dSource, ncase, PatientPosition):
+def DOSXYZegsinp(timeStamp, EGS_HOME, egsPhant, mlcLib, beamDir, phspName, VCUinp, ISO, gantry, couch, coll, MUindx, dSource, ncase, PatientPosition):
     numCtrlPts = len(flatten(MUindx))
     ISO = flatten(ISO)
     gantry = flatten(gantry)
@@ -473,17 +475,15 @@ def DOSXYZegsinp(timeStamp, EGS_HOME, egsPhant, mlcLib, beamDir, phspEnd, VCUinp
         if thisLine.find('{myMlcLib}') >= 0:
             if VCUinp == '0':
                 thisLine = thisLine.format(myMlcLib=VCUinp,
-                myPhsp=''.join([EGS_HOME, beamDir, os.path.sep, timeStamp,
-                '_BEAMnrc', phspEnd]), myVcuTxt=VCUinp)
+                myPhsp = phspName,
+                myVcuTxt=VCUinp)
             elif VCUinp == mlcLib:
                 thisLine = thisLine.format(myMlcLib=mlcLib,
-                myPhsp=''.join([EGS_HOME, beamDir, os.path.sep, timeStamp,
-                '_BEAMnrc', phspEnd]),
-                myVcuTxt=''.join([timeStamp, '_MLCnrc']))
+                myPhsp = phspName,
+                myVcuTxt=''.join([timeStamp, '_BEAMnrc']))
             else:
                 thisLine = thisLine.format(myMlcLib=mlcLib,
-                myPhsp=''.join([EGS_HOME, beamDir, os.path.sep, timeStamp,
-                '_BEAMnrc', phspEnd]),
+                myPhsp = phspName,
                 myVcuTxt=''.join([VCUinp, timeStamp, '_vcu.txt']))
         if thisLine.find('{NCASE}') >= 0:
             thisLine = thisLine.format(NCASE=ncase,
@@ -536,7 +536,7 @@ def syncmlcSeq(timeStamp, leafPos, MUindx, SCD, SAD, leafRadius, is_static, phys
     physicalLeafOffset, numCtrlPts)
     # reshape MUindx according to numCtrlPts
     MUindx = np.asarray(flatten(MUindx)).reshape((1, numCtrlPts)).tolist()
-    fileName = ''.join([timeStamp, '_MLCnrc.mlc'])
+    fileName = ''.join([timeStamp, '_BEAMnrc.mlc'])
     f = open(fileName, 'w')
 
     # write title
@@ -732,6 +732,15 @@ def returnAngle(angle, lowBound, upBound):
 def rewriteRP(RP, prefix):
     # Need to change
     # SOPInstanceUID, RTPlanLabel, RTPlanDescription
+
+    # Add ReferencedRTPlanSequence
+    dataset = dicom.dataset.Dataset()
+    dataset.add_new(0x81150, 'UI', RP.SOPClassUID)
+    dataset.add_new(0x81155, 'UI', RP.SOPInstanceUID)
+    dataset.add_new(0x300a0055, 'CS', 'VERIFIED_PLAN')
+    sequence = dicom.sequence.Sequence()
+    sequence.append(dataset)
+    RP.ReferencedRTPlanSequence = sequence
 
     # SOPInstanceUID
     RP.SOPInstanceUID = dicom.UID.generate_uid()
@@ -1565,3 +1574,19 @@ def remove(baseDir, fileList):
             pass
         except IOError:
             pass
+
+
+def estUncFromDose(dose, presc, lvl=0.707):
+    unc =  np.sqrt(presc) / np.sqrt(dose) * lvl
+    unc = np.where(dose > presc, lvl, unc)
+    return unc
+
+    
+def isOpen(ip, port=22):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.connect((ip, port))
+        s.shutdown(2)
+        return True
+    except:
+        return False

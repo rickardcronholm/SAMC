@@ -25,6 +25,9 @@ import time
 import samcUtil
 import tarfile
 import subprocess
+import re
+import fileinput
+import logging
 
 # get current time
 now = datetime.datetime.now()
@@ -45,30 +48,23 @@ else:
     flock.write('Busy\n')
     flock.close()
 
-# get variables from confFile
+# logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger('daemonB')
+logger.setLevel(logging.WARNING)
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+
+# get variables from global confFile
 confFile = 'samc.conf'
 with open(confFile) as f:
     confCont = f.readlines()
-whatToGet = ['daemonB.timeFile', 'common.EGS_HOME', 'common.dosxyzDir',
-'common.VCUinp', 'daemonB.nBatch', 'daemonB.beamPegs']
+whatToGet = ['daemonB.timeFile', 'common.EGS_HOME', 'common.dosxyzDir']
 # generate struct
 cv = samcUtil.struct()
 # read variables
 cv = samcUtil.getConfVars(cv, whatToGet, confCont)
 # convert types
-cv = samcUtil.typeCast(cv, ['nBatch'], [int])
 
-'''
-# get variables from confFile
-confFile = 'samc.conf'
-timeFile = samcUtil.getVariable(confFile,'daemonB.timeFile')
-EGS_HOME = samcUtil.getVariable(confFile,'common.EGS_HOME')
-VCUinp = samcUtil.getVariable(confFile,'common.VCUinp')
-dosxyznrc = samcUtil.getVariable(confFile,'common.dosxyzDir')
-nBatch = int(samcUtil.getVariable(confFile,'daemonB.nBatch'))
-beamPegs = samcUtil.getVariable(confFile,'daemonB.beamPegs')
-logFile = samcUtil.getVariable(confFile,'daemonB.logFile')
-'''
 
 # get time of last run
 f = open(cv.timeFile, 'r')
@@ -112,63 +108,93 @@ for i in range(0, len(tarfiles)):
 
     print 'timeStamp: ', timeStamp
     sys.stdout.flush()
-
-    # get BEAMdir
-    f = open(os.path.join(timeStamp, timeStamp + '.beamDir'), 'r')
-    beamDir = f.readline().rstrip()
-    f.close()
-
-    # get MLCdir
-    mlcDir = False
+    
     try:
-        f = open(os.path.join(timeStamp, timeStamp + '.mlcDir'), 'r')
-        mlcDir = f.readline().rstrip()
+	    # get varaibles from local conf file
+        confFile = os.path.join(timeStamp, timeStamp + '.conf')
+        with open(confFile) as f:
+            confCont = f.readlines()
+        whatToGet = ['daemonB.nBatch', 'daemonC.dosxyznrc',
+        'daemonC.dosPegs']
+        # read variables
+        cv = samcUtil.getConfVars(cv, whatToGet, confCont)
+        # convert types
+        cv = samcUtil.typeCast(cv, ['nBatch'], [int])
+
+        # get BEAMdir
+        f = open(os.path.join(timeStamp, timeStamp + '.beamDir'), 'r')
+        beamDir = f.readline().rstrip()
         f.close()
-    except IOError:
+
+        # get MLCdir
+        mlcDir = False
+        try:
+            f = open(os.path.join(timeStamp, timeStamp + '.mlcDir'), 'r')
+            mlcDir = f.readline().rstrip()
+            f.close()
+        except IOError:
             pass
 
-    # copy files to destination folders
-    dirList = os.listdir(timeStamp + os.path.sep)
-    for file1 in dirList:  # file the files
-        if fnmatch.fnmatch(file1, '*BEAM*'):  # match the wildcard
-            # copy the files from origin to destination
-            shutil.copy2(os.path.join(timeStamp, file1), cv.EGS_HOME + beamDir)
-        if fnmatch.fnmatch(file1, '*vcu*'):  # match the wildcard
-            # copy the files from origin to destination
-            shutil.copy2(os.path.join(timeStamp, file1), cv.VCUinp)
-        if fnmatch.fnmatch(file1, '*DOSXYZ*'):  # match the wildcard
-            # copy the files from origin to destination
-            shutil.copy2(os.path.join(timeStamp, file1), cv.dosxyzDir)
-        if fnmatch.fnmatch(file1, '*phant'):  # match the wildcard
-            # copy the files from origin to destination
-            shutil.copy2(os.path.join(timeStamp, file1), cv.dosxyzDir)
-        if mlcDir and fnmatch.fnmatch(file1, '*MLC*'):  # match the wildcard
-            # copy the files from origin to destination
-            shutil.copy2(os.path.join(timeStamp, file1), cv.EGS_HOME + mlcDir)
+        # copy files to destination folders
+        dirList = os.listdir(timeStamp + os.path.sep)
+        for file1 in dirList:  # file the files
+            if fnmatch.fnmatch(file1, '*BEAM*'):  # match the wildcard
+                # copy the files from origin to destination
+                shutil.copy2(os.path.join(timeStamp, file1), cv.EGS_HOME + beamDir)
+            if fnmatch.fnmatch(file1, '*DOSXYZ*'):  # match the wildcard
+                # copy the files from origin to destination
+                shutil.copy2(os.path.join(timeStamp, file1), cv.dosxyzDir)
+            if fnmatch.fnmatch(file1, '*phant'):  # match the wildcard
+                # copy the files from origin to destination
+                shutil.copy2(os.path.join(timeStamp, file1), cv.dosxyzDir)
+            if mlcDir and fnmatch.fnmatch(file1, '*MLC*'):  # match the wildcard
+                # copy the files from origin to destination
+                shutil.copy2(os.path.join(timeStamp, file1), cv.EGS_HOME + mlcDir)
 
 
-    # get number of beams
-    f = open(os.path.join(timeStamp, timeStamp + '.numBeams'), 'r')
-    numBeams = int(f.readline().rstrip())
+        # get number of beams
+        f = open(os.path.join(timeStamp, timeStamp + '.numBeams'), 'r')
+        numBeams = int(f.readline().rstrip())
 
-    for j in range(0, numBeams):
-        thisBeamName = timeStamp + '_' + str(j) + '_BEAMnrc'
-        if j == 0:
-            if not os.path.exists(os.path.sep.join([cv.EGS_HOME + beamDir, '.'.join([thisBeamName, 'egsinp'])])):
-                thisBeamName = timeStamp + '_BEAMnrc'
+        for j in range(0, numBeams):
+            thisSimulation = timeStamp + '_' + str(j) + '_DOSXYZnrc'
+            if j == 0:
+                if not os.path.exists(os.path.sep.join([cv.EGS_HOME + beamDir, '.'.join([thisSimulation, 'egsinp'])])):
+                    thisSimulation = timeStamp + '_DOSXYZnrc'
 
-        HEN_HOUSE = os.environ.get('HEN_HOUSE')
-        exb = 'scripts/run_user_code_batch'
-        exbCall = ''.join([HEN_HOUSE, exb])
-        '''
-        f = open('/home/ricr/MCQA/queue', 'a')
-        f.write('{0} {1} {2} {3} p={4}\n'.format(exbCall, cv.beamDir,
-        thisBeamName, cv.beamPegs, cv.nBatch))
-        f.close()
-        '''
-        #os.system('%(exbCall)s %(cv.beamDir)s %(thisBeamName)s %(cv.beamPegs)s p=%(cv.nBatch)s' % locals())
-        subprocess.call([exbCall, beamDir, thisBeamName, cv.beamPegs,
-        '='.join(['p', str(cv.nBatch)])])
+            # set medSurr to AIR
+            lookup = 'AIR'
+            f = open(os.path.sep.join([cv.EGS_HOME, cv.dosxyznrc, 
+            thisSimulation + '.egsinp']), 'r')
+            for line in f:
+                if re.search('phant', line):
+                    phant = line.rstrip()
+                    break
+            f.close()
+
+            with open(phant) as myPhant:
+                for num, line in enumerate(myPhant, 1):
+                    if lookup in line:
+                        thisMed = num - 1
+
+            for line in fileinput.input(os.path.sep.join([cv.EGS_HOME, cv.dosxyznrc,
+            thisSimulation + '.egsinp']), inplace=1):
+                print line.replace("_medSurr_", str(thisMed)).rstrip()
+
+            HEN_HOUSE = os.environ.get('HEN_HOUSE')
+            exb = 'scripts/run_user_code_batch'
+            exbCall = ''.join([HEN_HOUSE, exb])
+
+            #os.system('%(exbCall)s %(beamDir)s %(thisBeamName)s %(cv.beamPegs)s p=%(cv.nBatch)s' % locals())
+            subprocess.call([exbCall, cv.dosxyznrc, thisSimulation, cv.dosPegs,
+            '='.join(['p', str(cv.nBatch)])])
+        
+    except Exception as exc:
+        hdlr = logging.FileHandler('.'.join([timeStamp, 'log']))
+        hdlr.setFormatter(formatter)
+        logger.addHandler(hdlr)
+        logger.exception(exc)
+        logger.handlers = []
 
 '''
     # write to log file

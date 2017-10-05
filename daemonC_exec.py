@@ -27,6 +27,7 @@ import re
 import fileinput
 import glob
 import subprocess
+import logging
 
 
 def find(pattern, path, compareDir, exclude):
@@ -41,13 +42,21 @@ def find(pattern, path, compareDir, exclude):
                             if not exclude in root:
                                 # check consistensy with beamDir
                                 # get BEAMDIR
-                                fb = open(os.path.join(timeStamp, timeStamp +
-                                '.beamDir'), 'r')
+                                fb = open(os.path.join(timeStamp, timeStamp + '.beamDir'), 'r')
                                 beamDir = fb.readline().rstrip()
                                 fb.close()
                                 if beamDir in root:
                                     result.append(os.path.join(root, name))
     return result
+    
+    
+def locate(pattern, compareDir, replacee, replacer):
+	files = glob.glob(pattern)
+	files = [x for x in files if os.path.exists(os.path.join(x.split('/')[-1].split('_')[0], 
+	         x.split('/')[-1].replace(replacee, replacer))) and not os.path.exists(os.path.join(x.split('/')[-1].split('_')[0],
+	         x.split('/')[-1]))]
+        return files
+	
 
 # get current time
 now = datetime.datetime.now()
@@ -67,32 +76,24 @@ else:
     flock = open(lockFile, 'w')
     flock.write('Busy\n')
     flock.close()
+    
+# logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger('daemonC')
+logger.setLevel(logging.WARNING)
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 
 # get variables from confFile
 confFile = 'samc.conf'
 with open(confFile) as f:
     confCont = f.readlines()
-whatToGet = ['daemonC.timeFile', 'common.EGS_HOME', 'daemonC.dosxyznrc',
-'daemonC.nBatch', 'daemonB.beamPegs', 'daemonC.ncaseMultiplier', 
-'daemonC.dosPegs']
+whatToGet = ['daemonC.timeFile', 'common.EGS_HOME', 'daemonC.dosxyznrc']
 # generate struct
 cv = samcUtil.struct()
 # read variables
 cv = samcUtil.getConfVars(cv, whatToGet, confCont)
-# convert types
-cv = samcUtil.typeCast(cv, ['nBatch'], [int])
-nBatchBeam = int(samcUtil.getVariable(confFile, 'daemonB.nBatch'))
-'''
-timeFile = samcUtil.getVariable(confFile,'daemonC.timeFile')
-EGS_HOME = samcUtil.getVariable(confFile,'common.EGS_HOME')
-dosxyznrc = samcUtil.getVariable(confFile,'daemonC.dosxyznrc')
-nBatch = int(samcUtil.getVariable(confFile,'daemonC.nBatch'))
-dosPegs = samcUtil.getVariable(confFile,'daemonC.dosPegs')
-beamPegs = samcUtil.getVariable(confFile,'daemonB.beamPegs')
-ncaseMultiple = float(samcUtil.getVariable(confFile,'daemonC.ncaseMultiplier'))
-logFile = samcUtil.getVariable(confFile,'daemonC.logFile')
-nBatchBeam = int(samcUtil.getVariable(confFile,'daemonB.nBatch'))
-'''
+
+
 # get time of last run
 f = open(cv.timeFile, 'r')
 oldTime = f.readline().rstrip()
@@ -100,160 +101,89 @@ print 'This was last run at {0}'.format(oldTime)
 f.close()
 
 # get list of egslst files
-fileList = find('*.egslst', cv.EGS_HOME, dname, cv.dosxyznrc)
-egslogList = []
+#fileList = find('*.egslst', cv.EGS_HOME, dname, cv.dosxyznrc)
+fileList = locate(os.path.join(cv.EGS_HOME, cv.dosxyznrc, '*.egslst'), 
+           dname, '.egslst', '.egsinp')
+egslsts = []
 # get time of modification of file
 for i in range(0, len(fileList)):
-    try:
-        fileTime = os.path.getmtime(fileList[i])
-        fileTime = time.localtime(fileTime)
-        fileTime = time.strftime("%y%m%d%H%M%S", fileTime)
-        # if more recent than last run, append to list
-        if fileTime > oldTime:
-            egslogList.append(fileList[i])
-    except OSError:
-        pass
+    fileTime = os.path.getmtime(fileList[i])
+    fileTime = time.localtime(fileTime)
+    fileTime = time.strftime("%y%m%d%H%M%S", fileTime)
+    # if more recent than last run, append to list
+    if fileTime > oldTime:
+        egslsts.append(fileList[i])
 
-# quit if no egslog found
-if len(egslogList) == 0:
+# quit if no egslst found
+if len(egslsts) == 0:
     print 'Nothing to do, exiting'
     samcUtil.writeTimeToFile(cv.timeFile, newTime)
     os.remove(lockFile)  # remove lockFile
     sys.exit()
 
 # in a for loop: addphsp, cleanup and initiate DOSXYZnrc simulation
-for i in range(0, len(egslogList)):
-    thisBeamDir, thisFile = os.path.split(egslogList[i])
-    thisFile, fileExtension = os.path.splitext(thisFile)
-    timeStamp = thisFile[0:thisFile.find('_')]
+for i in range(0, len(egslsts)):
+    thisDir, thisFile = os.path.split(egslsts[i])
+    thisSimulation, fileExtension = os.path.splitext(thisFile)
+    timeStamp = thisSimulation[0:thisSimulation.find('_')]
     print 'timeStamp: ', timeStamp
     sys.stdout.flush()
-
-    # get number of batchJobs for thisFile
-    dirList = os.listdir(thisBeamDir)
-    batchJobs = 0
-    for file1 in dirList:  # file the files
-        if fnmatch.fnmatch(file1, thisFile + '*.IAEAphsp'):  # match the wildcard
-            batchJobs += 1
-
-    # addphsp
-    addFile = os.path.join(thisBeamDir, thisFile)
-    subprocess.call(['addphsp', addFile, addFile, str(batchJobs), '1', '1', '1'])
-    #os.system('addphsp %(addFile)s %(addFile)s %(batchJobs)s 1 1 1' % locals())
-
-    # check consistensy of checksum
-    chksum = os.popen("./checksumTest.py %(addFile)s" % locals()).read().rstrip()
-    if chksum == 'False':  #  rerun BEAM simulation
-        removeFiles = []
-        removeTypes = [addFile + '*_w*', addFile + '*phsp*',
-        addFile + '*header']
-        for name in removeTypes:
-            removeFiles.append(glob.glob(name))
+    
+    try:
+        # get varaibles from local conf file
+        confFile = os.path.join(timeStamp, timeStamp + '.conf')
+        with open(confFile) as f:
+            confCont = f.readlines()
+        whatToGet = ['daemonC.nBatch', 'daemonC.dosPegs', 
+        'daemonC.desiredUnc']
+        # read variables
+        cv = samcUtil.getConfVars(cv, whatToGet, confCont)
+        # convert types
+        cv = samcUtil.typeCast(cv, ['nBatch'], [int])
+    
+        # recompute ncase needed to reach uncert
+        with open(egslsts[i]) as flst:
+	        lst = flst.readlines()
+        lookFor = 'average % error of doses >  0.500 of max dose ='
+        unc = float([x for x in lst if x.strip().startswith(lookFor)][0].split('=')[-1].strip().strip('%\n'))
+        # read original NCASE
+        with open(egslsts[i].replace('.egslst', '.egsinp')) as finp:
+	        inp = finp.readlines()
+        ncaseLine = [x for x in inp if x.strip().endswith('NCASE etc')][0]
+        ncaseOrig = float(ncaseLine.split(',')[0])
+        ncase = (unc / cv.desiredUnc)**2 * ncaseOrig
+        replaceLine = ','.join([str(int(ncase))] + [x for j, x in enumerate(ncaseLine.split(',')) if j > 0])
+        # rewrite it
+        for line in fileinput.input(egslsts[i].replace('.egslst', '.egsinp'), inplace=1):
+            # set zeroairdose to 0 = off
+            if line.rstrip().endswith(', zeroairdose etc'):
+                line = '0' + line[1:]
+            print line.replace(ncaseLine, replaceLine).rstrip()
+        
+        # move egslst to timeStampDir
+        shutil.move(egslsts[i], os.path.join(dname, timeStamp))
+    
+        # clean up auxillary files
+        removeFiles = glob.glob(os.path.join(cv.EGS_HOME, cv.dosxyznrc, 
+        thisSimulation) + '*')
+        removeFiles = [x for x in removeFiles if not x.endswith('.egsinp')]
         for name in removeFiles:
             os.remove(name)
-        '''
-        removeFiles = addFile+'*_w*' # remove tempFiles
-        os.system('rm %(removeFiles)s' % locals()) # cleanup
-        removeFiles = addFile+'*phsp*' # remove phsp
-        os.system('rm %(removeFiles)s' % locals()) # cleanup
-        removeFiles = addFile+'*header' # remove header
-        os.system('rm %(removeFiles)s' % locals()) # cleanup
-        '''
-
-        # get BEAMDIR
-        fb = open(os.path.join(timeStamp, timeStamp + '.beamDir'), 'r')
-        beamDir = fb.readline().rstrip()
+    
+        # initialize DOSXYZnrc simulation
         HEN_HOUSE = os.environ.get('HEN_HOUSE')
         exb = 'scripts/run_user_code_batch'
         exbCall = ''.join([HEN_HOUSE, exb])
-        subprocess.call([exbCall, beamDir, thisFile, cv.beamPegs,
-        '='.join(['p', str(cv.nBatchBeam)])])
-        #os.system('%(exbCall)s %(beamDir)s %(thisFile)s %(cv.beamPegs)s p=%(cv.nBatchBeam)s' % locals())
-
-        # log files for which checksum != filesize
-        fchksum = open('chksum.log', 'a')
-        fchksum.write('{0}\n'.format(timeStamp))
-        fchksum.close()
-
-        continue  # skip to next
-
-
-    # if bs file found
-    if os.path.isfile('/'.join([dname,timeStamp,thisFile+'.bs'])):
-        # if phspType = 4 modify egsinp and rerun to get egs mode egslst
-        with open('.'.join([addFile, 'egsinp'])) as inF:
-            for line in inF:
-                if 'phspType=4' in line:
-                    oldWATCH = line.rstrip()
-                    # syntesize new IWATCH line
-                    newWATCH = '0, 0, 4, 1' + oldWATCH[oldWATCH.index('4')
-                    + 1:len(oldWATCH)]
-                    for line in fileinput.input('.'.join([addFile, 'egsinp']), inplace=1):
-                        print line.replace(oldWATCH, newWATCH).rstrip()
-
-                    # rerun simulation
-                    # get BEAMDIR
-                    fb = open(os.path.join(timeStamp, timeStamp +
-                    '.beamDir'), 'r')
-                    beamDir = fb.readline().rstrip()
-                    HEN_HOUSE = os.environ.get('HEN_HOUSE')
-                    ex = 'scripts/run_user_code'
-                    exCall = ''.join([HEN_HOUSE, ex])
-                    subprocess.call([exCall, beamDir, thisFile, cv.beamPegs])
-                    #os.system('%(exCall)s %(beamDir)s %(thisFile)s %(cv.beamPegs)s' % locals())
-                    break
-        shutil.move('.'.join([addFile, 'egslst']),
-        os.path.join(dname, timeStamp, ''))
-
-    removeFiles = glob.glob(addFile + '*_w*')
-    for name in removeFiles:
-        os.remove(name)
-
-    # initate DOSXYZnrc simulation
-    dosxyzFile = thisFile[0:thisFile.rfind('_')] + '_DOSXYZnrc'
-    # set medSurr to AIR
-    lookup = 'AIR'
-    f = open(os.path.sep.join([cv.EGS_HOME, cv.dosxyznrc, dosxyzFile + '.egsinp']),
-    'r')
-    for line in f:
-        if re.search('phant', line):
-            phant = line.rstrip()
-            break
-    f.close()
-
-    with open(phant) as myPhant:
-        for num, line in enumerate(myPhant, 1):
-            if lookup in line:
-                thisMed = num - 1
-
-    for line in fileinput.input(os.path.sep.join([cv.EGS_HOME, cv.dosxyznrc,
-    dosxyzFile + '.egsinp']), inplace=1):
-        print line.replace("_medSurr_", str(thisMed)).rstrip()
-
-    # multiply nCase
-    print ''.join([addFile, '.1.IAEAheader'])
-    lookup = 'PARTICLES:'
-    breakNext = False
-    f = open(''.join([addFile, '.1.IAEAheader']), 'r')
-    for line in f:
-        if breakNext:
-            nPart = float(line.rstrip().lstrip())
-            break
-        if re.search(lookup, line):
-            breakNext = True
-    f.close()
-    nCase = int(cv.ncaseMultiplier * nPart)
-    for line in fileinput.input('/'.join([cv.EGS_HOME, cv.dosxyznrc,
-    dosxyzFile + '.egsinp']), inplace=1):
-        print line.replace("_ncase_", str(nCase)).rstrip()
-
-    # initialize DOSXYZnrc simulation
-    HEN_HOUSE = os.environ.get('HEN_HOUSE')
-    exb = 'scripts/run_user_code_batch'
-    exbCall = ''.join([HEN_HOUSE, exb])
-    subprocess.call([exbCall, cv.dosxyznrc, dosxyzFile, cv.dosPegs,
-    '='.join(['p', str(cv.nBatch)])])
-    #os.system('%(exbCall)s %(cv.dosxyznrc)s %(dosxyzFile)s %(cv.dosPegs)s p=%(cv.nBatch)s' % locals())
+        subprocess.call([exbCall, cv.dosxyznrc, thisSimulation, cv.dosPegs,
+        '='.join(['p', str(cv.nBatch)])])
+        #os.system('%(exbCall)s %(cv.dosxyznrc)s %(dosxyzFile)s %(cv.dosPegs)s p=%(str(cv.nBatch))s' % locals())
+        
+    except Exception as exc:
+        hdlr = logging.FileHandler('.'.join([timeStamp, 'log']))
+        hdlr.setFormatter(formatter)
+        logger.addHandler(hdlr)
+        logger.exception(exc)
+        logger.handlers = []
 
 # update time of last run
 samcUtil.writeTimeToFile(cv.timeFile, newTime)
